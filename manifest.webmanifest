@@ -1,0 +1,25 @@
+{
+  "name": "Mílù 麋鹿 — learn Chinese",
+  "short_name": "Mílù",
+  "description": "Characters, pinyin, tones and pronunciation practice, built from Ross's lessons.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF7EF",
+  "theme_color": "#FFF7EF",
+  "lang": "en-AU",
+  "categories": ["education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-1024.png", "sizes": "1024x1024", "type": "image/png" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Study now", "url": "./index.html#/session", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Tone trainer", "url": "./index.html#/tones" },
+    { "name": "Speaking", "url": "./index.html#/speak" }
+  ]
+}
