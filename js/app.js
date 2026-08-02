@@ -14,7 +14,7 @@
 
   // Views that take over the whole screen (no bottom nav).
   const FULLSCREEN = new Set(['session', 'quiz', 'tones', 'speak', 'sentences',
-                              'dialogue', 'char', 'write']);
+                              'dialogue', 'char', 'write', 'match']);
 
   let root, navEl, currentRoute = '';
 

@@ -11,6 +11,10 @@
     Object.values(days).forEach(d => { reviews += d.reviews || 0; correct += d.correct || 0; });
     const acc = reviews ? Math.round(correct / reviews * 100) : 0;
     const traced = Object.values(Store.S.chars).filter(x => x.traced > 0).length;
+    const lvl = Gamify.level();
+    Gamify.checkBadges();
+    const badges = Gamify.badgeState();
+    const earned = badges.filter(b => b.earned).length;
 
     host.innerHTML = `
       <div class="topbar">
@@ -20,6 +24,18 @@
         </div>
         <div class="topbar__spacer"></div>
         ${Mascot.svg(streak >= 3 ? 'proud' : 'idle', 56)}
+      </div>
+
+      <div class="card card--amber">
+        <div class="hstack" style="justify-content:space-between">
+          <span style="font-weight:800;font-size:17px">Level ${lvl.level}</span>
+          <span class="small muted">${lvl.into} / ${lvl.need} XP</span>
+        </div>
+        <div class="bar" style="margin-top:8px">
+          <div class="bar__fill" style="width:${lvl.into / lvl.need * 100}%"></div>
+        </div>
+        <p class="card__note small" style="margin-top:8px">
+          ${Gamify.stats.xp} XP altogether · ${lvl.need - lvl.into} to level ${lvl.level + 1}</p>
       </div>
 
       <div class="card" style="display:flex;justify-content:space-around;text-align:center">
@@ -32,6 +48,16 @@
       </div>
 
       ${activityCard(days)}
+
+      <div class="section-title">Achievements ${earned}/${badges.length}</div>
+      <div class="grid grid--3">
+        ${badges.map(b => `
+          <div class="badge${b.earned ? '' : ' badge--locked'}">
+            <span class="badge__icon">${b.icon}</span>
+            <span class="badge__name">${UI.esc(b.name)}</span>
+            <span class="badge__note">${UI.esc(b.note)}</span>
+          </div>`).join('')}
+      </div>
 
       <div class="card">
         <div class="card__title">📚 Your collection</div>
@@ -75,6 +101,19 @@
       </div>
 
       <div class="card">
+        <div class="card__title">Daily XP goal</div>
+        <p class="card__note">Hit this to keep your streak. A lesson is roughly 45 XP.</p>
+        <div class="hstack" style="margin-top:10px">
+          ${[[30, 'Gentle'], [60, 'Regular'], [100, 'Serious'], [150, 'Intense']].map(([n, label]) => `
+            <button class="btn btn--sm flex1 ${n === s.dailyXP ? 'btn--primary' : 'btn--ghost'}"
+                    data-xp="${n}" style="flex-direction:column;gap:0;padding:8px 4px">
+              <span>${n}</span>
+              <span style="font-size:10px;font-weight:600;opacity:.8">${label}</span>
+            </button>`).join('')}
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card__title">New words per day</div>
         <p class="card__note">Currently ${s.newPerDay}. Reviews are on top of this.</p>
         <div class="hstack" style="margin-top:10px">
@@ -104,16 +143,19 @@
         <div class="card__title">Voice</div>
         <p class="card__note" id="voiceNote">Checking what's available…</p>
         <select class="field" id="voice" style="margin-top:8px"></select>
+        <div id="voiceWarn"></div>
         <label class="small muted" style="display:block;margin-top:12px">
-          Speed — ${s.rate.toFixed(2)}×</label>
+          Speed — <span id="rateVal">${s.rate.toFixed(2)}</span>×</label>
         <input type="range" id="rate" min="0.5" max="1.2" step="0.05" value="${s.rate}"
                style="width:100%;margin-top:6px">
-        <button class="btn btn--sm btn--ghost" id="testVoice" style="margin-top:10px">
+        <button class="btn btn--sm btn--ghost btn--block" id="testVoice" style="margin-top:10px">
           ${UI.icon('sound', 15)} Test: 你好，我叫麋鹿</button>
       </div>
 
       <div class="card">
         <div class="stack">
+          ${toggleRow('hearts', 'Hearts', s.hearts,
+            s.hearts ? '5 mistakes per lesson, like Duolingo' : 'Unlimited mistakes')}
           ${toggleRow('theme', 'Dark mode',
             s.theme === 'dark' || (s.theme === 'auto' &&
               window.matchMedia('(prefers-color-scheme: dark)').matches),
@@ -261,6 +303,13 @@
         App.render();
       }));
 
+    host.querySelectorAll('[data-xp]').forEach(b =>
+      b.addEventListener('click', () => {
+        s.dailyXP = +b.dataset.xp;
+        Store.saveSettings();
+        App.render();
+      }));
+
     host.querySelectorAll('[data-pinyin]').forEach(b =>
       b.addEventListener('click', () => {
         s.pinyinMode = b.dataset.pinyin;
@@ -282,6 +331,8 @@
       }));
 
     const rate = host.querySelector('#rate');
+    const rateVal = host.querySelector('#rateVal');
+    rate.addEventListener('input', () => { if (rateVal) rateVal.textContent = (+rate.value).toFixed(2); });
     rate.addEventListener('change', () => {
       s.rate = +rate.value;
       Store.saveSettings();
@@ -323,34 +374,70 @@
   function fillVoices(host) {
     const sel = host.querySelector('#voice');
     const note = host.querySelector('#voiceNote');
+    const warn = host.querySelector('#voiceWarn');
     if (!sel) return;
+
+    const HOW_TO = `<b>Settings → Accessibility → Spoken Content → Voices →
+      Chinese → Chinese (China mainland)</b>`;
 
     function paint() {
       const list = Audio2.chineseVoices();
       if (!list.length) {
-        note.innerHTML = `No Chinese voice found on this device. On iPhone:
-          <b>Settings → Accessibility → Spoken Content → Voices → Chinese</b>,
-          then download one (the Enhanced ones sound much better).`;
+        note.innerHTML = `No Chinese voice on this device yet. Download one at
+          ${HOW_TO} — pick <b>Han</b> and choose the Premium download.`;
         sel.classList.add('hidden');
+        warn.innerHTML = '';
         return;
       }
+
       sel.classList.remove('hidden');
-      note.innerHTML = `${list.length} Chinese voice${list.length === 1 ? '' : 's'} available.
-        Downloading an <b>Enhanced</b> or <b>Premium</b> voice in
-        Settings → Accessibility → Spoken Content → Voices makes a big difference.`;
       const cur = Audio2.voice;
-      sel.innerHTML = list.map(v =>
+      const hasHan = list.some(v => /han/i.test(v.name || ''));
+
+      note.innerHTML = `${list.length} Chinese voice${list.length === 1 ? '' : 's'} on this device.
+        Currently using <b>${cur ? UI.esc(cur.name) : 'none'}</b>${
+          cur ? ` (${Audio2.qualityLabel(cur)})` : ''}.`;
+
+      // Best quality first so the good ones are the obvious pick.
+      const sorted = list.slice().sort((a, b) =>
+        Audio2.quality(b) - Audio2.quality(a) || (a.name || '').localeCompare(b.name || ''));
+
+      sel.innerHTML = sorted.map(v =>
         `<option value="${UI.esc(v.voiceURI)}"${cur && v.voiceURI === cur.voiceURI ? ' selected' : ''}>
-          ${UI.esc(v.name)} — ${UI.esc(v.lang)}</option>`).join('');
+          ${UI.esc(v.name)} · ${Audio2.qualityLabel(v)} · ${UI.esc(v.lang)}</option>`).join('');
+
+      if (!hasHan) {
+        warn.innerHTML = `<p class="card__note small" style="margin-top:10px">
+          💡 <b>Han</b> isn't installed here. It's the nicest Mandarin voice Apple
+          ships — get it at ${HOW_TO}, tap <b>Han</b>, and let the Premium version
+          download. It'll be picked automatically once it's there.</p>`;
+      } else if (cur && Audio2.quality(cur) < 2) {
+        warn.innerHTML = `<p class="card__note small" style="margin-top:10px">
+          💡 You have Han, but on the Compact version. Download the Premium one at
+          ${HOW_TO} for a big jump in quality.</p>`;
+      } else {
+        warn.innerHTML = '';
+      }
     }
 
     paint();
+    // iOS fills the voice list asynchronously, sometimes more than once.
     setTimeout(paint, 700);
+    setTimeout(paint, 2000);
+    if (window.speechSynthesis) {
+      speechSynthesis.addEventListener('voiceschanged', paint, { once: true });
+    }
+
     sel.addEventListener('change', () => {
+      const v = Audio2.chineseVoices().find(x => x.voiceURI === sel.value);
       Store.S.settings.voiceURI = sel.value;
+      // Store the name too — voice URIs change between devices and iOS updates,
+      // so the name is what actually makes the choice stick.
+      Store.S.settings.voiceName = v ? v.name : '';
       Store.saveSettings();
       Audio2.pickVoice();
-      Audio2.speak('你好');
+      Audio2.speak('你好，我叫麋鹿');
+      paint();
     });
   }
 

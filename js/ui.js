@@ -34,14 +34,35 @@
 
   /* ---- word rendering ---------------------------------------------------- */
 
+  /**
+   * Pick a font size that keeps a whole word on one line.
+   *
+   * Each character occupies roughly 1.15em once the pinyin above it and the
+   * inter-character gap are counted, so a six-character word at the one-or-two
+   * character size would need 600px on a 375px screen. Sizing from the length
+   * means 你 fills the card and 很高兴认识你 still fits.
+   *
+   * @param {number} n      characters in the word
+   * @param {number} cap    largest size to use, px
+   */
+  function hanziSize(n, cap) {
+    cap = cap || 96;
+    // Leave room for the 16px view padding either side plus a little breathing space.
+    const avail = `(100vw - 56px)`;
+    const per = (n * 1.15).toFixed(2);
+    const floor = n >= 5 ? 26 : n === 4 ? 30 : n === 3 ? 38 : 46;
+    return `clamp(${floor}px, calc(${avail} / ${per}), ${cap}px)`;
+  }
+
   /** Characters with their pinyin stacked above, coloured by tone. */
   function ruby(word, opts) {
     opts = opts || {};
     const units = word.units && word.units.length
       ? word.units
       : [...word.hanzi].map(c => ({ c, p: '', t: 0 }));
-    const size = opts.size || '64px';
     const hide = opts.hidePinyin;
+    // `size` may be an explicit value; otherwise fit to the word's length.
+    const size = opts.size || hanziSize(units.length, opts.cap);
 
     const inner = units.map(u => `
       <span class="ruby__u">
@@ -52,6 +73,13 @@
     return `<div class="ruby${hide ? ' ruby--hide' : ''}"
                  style="font-size:${size}"
                  data-ruby="${esc(word.id || word.hanzi)}">${inner}</div>`;
+  }
+
+  /** Plain characters, no pinyin, sized to fit. */
+  function hanziBlock(hanzi, cap) {
+    const n = [...hanzi].length;
+    return `<div class="hz" style="font-size:${hanziSize(n, cap)};line-height:1.15;
+             letter-spacing:.03em;max-width:100%">${esc(hanzi)}</div>`;
   }
 
   /** Pinyin as plain text, each syllable coloured by its tone. */
@@ -188,7 +216,7 @@
   }
 
   window.UI = {
-    esc, icon, ruby, pinyinColoured, toneDots, toast, confetti,
+    esc, icon, ruby, hanziSize, hanziBlock, pinyinColoured, toneDots, toast, confetti,
     sheet, closeSheet, ring, topicEmoji, shuffle, distractors, el,
   };
 })();

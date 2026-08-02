@@ -90,6 +90,14 @@ body {
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Nothing should ever scroll the page sideways. */
+  overflow-x: hidden;
+}
+
+/* Long words and pasted text must wrap rather than push the layout wide. */
+.view, .session, .card, .tile, .row, .choice, .banner, .sheet {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -280,20 +288,36 @@ ul { margin: 0; padding: 0; list-style: none; }
 /* --- hanzi ---------------------------------------------------------------- */
 .hz { font-family: var(--hanzi); font-weight: 500; }
 
+/* Characters are sized from word length in JS (UI.hanziSize) so a six-character
+   word still fits one line. These are the belt-and-braces guards. */
 .hz-big {
   font-family: var(--hanzi);
-  font-size: clamp(64px, 21vw, 110px);
-  line-height: 1.12;
+  font-size: clamp(44px, 19vw, 100px);
+  line-height: 1.14;
   font-weight: 500;
-  letter-spacing: .04em;
+  letter-spacing: .03em;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .py { font-size: 19px; font-weight: 700; color: var(--amber-deep); letter-spacing: .01em; }
 .en { font-size: 17px; color: var(--ink-soft); }
 
 /* ruby-style stacked pinyin over characters */
-.ruby { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; }
-.ruby__u { display: flex; flex-direction: column; align-items: center; min-width: 1em; }
+.ruby {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 6px;
+  max-width: 100%;
+}
+.ruby__u {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 1em;
+  max-width: 100%;
+}
 .ruby__p {
   font-size: .30em;
   font-weight: 700;
@@ -763,6 +787,198 @@ textarea.field { min-height: 110px; resize: vertical; font-family: var(--hanzi);
   from { transform: translateY(-8vh) rotate(0); opacity: 1; }
   to   { transform: translateY(108vh) rotate(760deg); opacity: .9; }
 }
+
+/* --- hearts, XP, combo ----------------------------------------------------- */
+.hearts { display: flex; gap: 3px; align-items: center; }
+.heart { font-size: 17px; line-height: 1; transition: transform .25s cubic-bezier(.34,1.56,.64,1), opacity .25s ease; }
+.heart--gone { opacity: .22; filter: grayscale(1); transform: scale(.82); }
+.heart--pop { animation: heartPop .45s cubic-bezier(.34,1.56,.64,1); }
+@keyframes heartPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.5) rotate(-12deg); }
+  100% { transform: scale(.82); }
+}
+
+.combo {
+  position: fixed;
+  left: 50%;
+  top: 26%;
+  transform: translate(-50%, 0) scale(.7);
+  font-weight: 900;
+  font-size: 30px;
+  color: var(--amber-deep);
+  text-shadow: 0 2px 0 #fff, 0 6px 16px rgba(200, 120, 40, .35);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 70;
+}
+.combo--on { animation: comboPop 1s cubic-bezier(.34, 1.56, .64, 1) forwards; }
+@keyframes comboPop {
+  0%   { opacity: 0; transform: translate(-50%, 12px) scale(.6) rotate(-6deg); }
+  25%  { opacity: 1; transform: translate(-50%, -6px) scale(1.18) rotate(3deg); }
+  60%  { opacity: 1; transform: translate(-50%, -14px) scale(1) rotate(0); }
+  100% { opacity: 0; transform: translate(-50%, -46px) scale(.92); }
+}
+
+.xp-pop {
+  position: absolute;
+  font-weight: 900;
+  font-size: 17px;
+  color: var(--mint);
+  pointer-events: none;
+  animation: xpFloat .95s ease-out forwards;
+  z-index: 60;
+}
+@keyframes xpFloat {
+  from { opacity: 1; transform: translateY(0) scale(.9); }
+  to   { opacity: 0; transform: translateY(-42px) scale(1.1); }
+}
+
+/* --- learning path --------------------------------------------------------- */
+.path { position: relative; padding: 6px 0 10px; }
+.path__line {
+  position: absolute;
+  left: 50%;
+  top: 0; bottom: 0;
+  width: 5px;
+  margin-left: -2.5px;
+  background: var(--line);
+  border-radius: 3px;
+  z-index: 0;
+}
+.path__node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  width: 100%;
+  text-align: left;
+}
+.path__node:nth-child(odd)  { padding-left: 8%; }
+.path__node:nth-child(even) { padding-left: 26%; }
+
+.path__dot {
+  width: 62px; height: 62px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 27px;
+  flex: none;
+  background: var(--surface);
+  box-shadow: 0 5px 0 var(--line), var(--shadow-sm);
+  transition: transform .16s cubic-bezier(.34,1.56,.64,1);
+  position: relative;
+}
+.path__node:active .path__dot { transform: translateY(3px) scale(.96); }
+.path__dot--done   { background: var(--mint);  box-shadow: 0 5px 0 #3E9B78; }
+.path__dot--now    { background: var(--amber); box-shadow: 0 5px 0 var(--amber-deep); }
+.path__dot--locked { opacity: .5; filter: grayscale(.55); }
+.path__dot--now::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 3px solid var(--amber);
+  opacity: .35;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1);    opacity: .35; }
+  50%      { transform: scale(1.12); opacity: 0; }
+}
+.path__crowns {
+  position: absolute;
+  bottom: -6px; right: -4px;
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: var(--shadow-sm);
+  color: var(--amber-deep);
+}
+.path__label { min-width: 0; }
+.path__title { font-weight: 800; font-size: 15px; }
+.path__sub { font-size: 12px; color: var(--muted); }
+
+/* --- match pairs ----------------------------------------------------------- */
+.match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.match-tile {
+  min-height: 62px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--line), var(--shadow-sm);
+  display: grid;
+  place-items: center;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 15px;
+  text-align: center;
+  transition: all .16s ease;
+  overflow-wrap: anywhere;
+}
+.match-tile .hz { font-size: 25px; font-weight: 500; }
+.match-tile:active { transform: scale(.96); }
+.match-tile--sel   { box-shadow: inset 0 0 0 3px var(--amber); background: var(--amber-soft); }
+.match-tile--right { box-shadow: inset 0 0 0 3px var(--mint); background: var(--mint-soft); color: var(--mint); }
+.match-tile--wrong { animation: shake .4s ease; box-shadow: inset 0 0 0 3px var(--bad); background: var(--bad-soft); }
+.match-tile--gone  { opacity: 0; pointer-events: none; transform: scale(.7); }
+
+/* --- typing / keyboard input ------------------------------------------------ */
+.tone-keys { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.tone-key {
+  min-width: 42px;
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-weight: 700;
+  font-size: 17px;
+}
+.tone-key:active { transform: scale(.93); }
+
+/* --- exercise header chip --------------------------------------------------- */
+.ex-kind {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.hard-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--lilac);
+  background: var(--lilac-soft);
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+/* --- level / achievements ---------------------------------------------------- */
+.badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 13px 8px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+}
+.badge--locked { opacity: .38; filter: grayscale(1); }
+.badge__icon { font-size: 30px; line-height: 1; }
+.badge__name { font-size: 11.5px; font-weight: 800; line-height: 1.25; }
+.badge__note { font-size: 10px; color: var(--muted); line-height: 1.2; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

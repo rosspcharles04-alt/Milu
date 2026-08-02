@@ -371,5 +371,8 @@
     host.querySelector('#back').addEventListener('click', () => App.go('#/practice'));
   }
 
+  // Shared with the in-lesson speaking exercise.
   Views.speak.targetContour = targetContour;
+  Views.speak.Plot = Plot;
+  Views.speak.applySandhi = applySandhi;
 })();

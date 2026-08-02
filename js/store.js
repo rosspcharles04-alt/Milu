@@ -18,10 +18,13 @@
     newPerDay: 10,
     pinyinMode: 'fade',      // fade | hidden | always
     voiceURI: '',
+    voiceName: 'Han',        // survives across devices/iOS updates; URI does not
     rate: 0.85,
     theme: 'auto',
     sound: true,
     haptics: true,
+    hearts: true,            // Duolingo-style limited mistakes per lesson
+    dailyXP: 60,
     familyCode: '',
   };
 

@@ -1,205 +1,280 @@
-/* The daily study session: new words get taught, then everything gets tested
-   and scheduled. */
+/* A lesson.
+
+   The old version was a flashcard you graded yourself. This one is a run of
+   mixed exercises chosen per word by how well it's known — recognise it, then
+   recall it, then produce it — with hearts, XP and a combo on top. That's the
+   Duolingo/HelloChinese shape, and it works far better than self-grading. */
 (function () {
   const Views = window.Views = window.Views || {};
 
-  Views.session = function (host) {
-    const queue = SRS.session();
-    if (!queue.length) return done(host, { reviewed: 0, right: 0, learned: 0, empty: true });
+  const LESSON_LEN = 14;   // exercises per lesson, ~5 minutes
 
-    const state = { i: 0, queue, reviewed: 0, right: 0, learned: 0, revealed: false, t0: Date.now() };
-    render(host, state);
+  /**
+   * @param args  []              the daily mix
+   *              ['lesson', id]  one deck
+   *              ['mistakes']    only words previously got wrong
+   */
+  Views.session = async function (host, args) {
+    args = args || [];
+    const mode = args[0] || 'daily';
+    const words = buildQueue(mode, args[1]);
+
+    if (!words.length) return empty(host, mode);
+
+    await Hanzi.load().catch(() => {});   // so tracing exercises are available
+
+    const st = {
+      mode,
+      pool: SRS.pool(mode === 'lesson' ? { lesson: args[1] } : null),
+      queue: words.map(w => ({ word: w, kind: null })),
+      i: 0,
+      lastKind: null,
+      ses: Gamify.newSession(),
+      wrongWords: [],
+      t0: Date.now(),
+    };
+    if (!st.pool.length) st.pool = Store.S.vocab;
+
+    run(host, st);
   };
 
-  function render(host, st) {
-    if (st.i >= st.queue.length) {
-      const secs = Math.round((Date.now() - st.t0) / 1000);
-      Store.dayEntry().seconds += secs;
-      Store.saveStats();
-      Cloud.push();
-      return done(host, st);
+  /* ---- building the queue ----------------------------------------------------- */
+
+  function buildQueue(mode, id) {
+    if (mode === 'mistakes') {
+      return Gamify.mistakeList().slice(0, LESSON_LEN).map(m => m.word);
     }
-
-    const w = st.queue[st.i];
-    const card = Store.S.progress[w.id];
-    const isNew = !card || card.state === 'new';
-    st.revealed = isNew;               // new words are shown in full straight away
-
-    host.innerHTML = shell(st, w, isNew);
-    wire(host, st, w, isNew);
-
-    if (isNew) setTimeout(() => Audio2.speak(w.hanzi), 260);
+    if (mode === 'lesson') {
+      const all = SRS.pool({ lesson: id });
+      // Unseen words first, then whatever is due, then a refresher.
+      const unseen = all.filter(w => !SRS.has(w.id));
+      const due = all.filter(w => {
+        const c = Store.S.progress[w.id];
+        return c && c.due <= Date.now();
+      });
+      const rest = all.filter(w => SRS.has(w.id) && !due.includes(w));
+      return unseen.slice(0, 6)
+        .concat(UI.shuffle(due).slice(0, 6))
+        .concat(UI.shuffle(rest).slice(0, 4))
+        .slice(0, LESSON_LEN);
+    }
+    return SRS.session(LESSON_LEN);
   }
 
-  function shell(st, w, isNew) {
-    const pct = st.i / st.queue.length;
-    const showPy = isNew || st.revealed || SRS.showPinyin(w.id);
+  /* ---- the loop ---------------------------------------------------------------- */
 
+  async function run(host, st) {
+    while (st.i < st.queue.length) {
+      const step = st.queue[st.i];
+      const word = step.word;
+      const kind = Exercises.pick(word, st.lastKind);
+      st.lastKind = kind;
+
+      host.innerHTML = chrome(st);
+      const body = host.querySelector('#exHost');
+      wireChrome(host, st);
+
+      const result = await Exercises.run(kind, body, word, { pool: st.pool });
+
+      if (result.skipped) {
+        // A teach card isn't graded — it just introduces the word.
+        if (!SRS.has(word.id)) SRS.answer(word.id, 2);
+        st.i++;
+        continue;
+      }
+
+      const r = Gamify.score(st.ses, result.correct, result.hard);
+
+      if (result.correct) {
+        const c = Store.S.progress[word.id];
+        SRS.answer(word.id, result.hard ? 3 : (c && c.streak >= 2 ? 2 : 1));
+        Gamify.clearMistake(word.id);
+        if (r.milestone) Gamify.showCombo(`${st.ses.combo} in a row! +${r.xp} XP`);
+      } else {
+        SRS.answer(word.id, 0);
+        Gamify.logMistake(word.id, kind);
+        if (!st.wrongWords.includes(word)) st.wrongWords.push(word);
+        // Duolingo brings a missed item back before the lesson ends.
+        st.queue.push({ word, kind: null });
+      }
+
+      st.i++;
+
+      if (r.dead) {
+        const carryOn = await outOfHearts(host, st);
+        if (!carryOn) break;
+      }
+    }
+    finish(host, st);
+  }
+
+  /* ---- the frame around each exercise -------------------------------------------- */
+
+  function chrome(st) {
+    const pct = st.i / st.queue.length * 100;
     return `
       <div class="session__head">
-        <button class="icon-btn" id="quit" aria-label="End session">${UI.icon('close', 18)}</button>
-        <div class="bar flex1"><div class="bar__fill" style="width:${pct * 100}%"></div></div>
-        <span class="chip chip--amber">${st.i + 1}/${st.queue.length}</span>
+        <button class="icon-btn" id="quit" aria-label="Quit lesson">${UI.icon('close', 18)}</button>
+        <div class="bar flex1"><div class="bar__fill" style="width:${pct}%"></div></div>
+        ${Gamify.heartsHTML(st.ses)}
+        <span class="chip chip--mint" id="xpChip">${st.ses.xp} XP</span>
       </div>
-
-      <div class="session__body">
-        ${isNew ? `<span class="pill pill--mint">New word</span>` : ''}
-        ${UI.ruby(w, { size: 'clamp(58px,19vw,100px)', hidePinyin: !showPy })}
-        <button class="btn btn--round" id="say" aria-label="Play pronunciation"
-                style="background:var(--amber-soft);color:var(--amber-deep)">
-          ${UI.icon('sound', 24)}
-        </button>
-        <div id="answer" class="${st.revealed ? '' : 'hidden'}">
-          <div class="en" style="font-size:20px;font-weight:700">${UI.esc(w.english)}</div>
-          ${meta(w)}
-        </div>
-      </div>
-
-      <div class="session__foot" id="foot">${isNew ? newFoot(w) : reviewFoot(st, w)}</div>`;
+      <div id="exHost" style="display:flex;flex-direction:column;flex:1"></div>`;
   }
 
-  function meta(w) {
-    const bits = [];
-    if (w.topic) bits.push(`<span class="pill">${UI.topicEmoji(w.topic)} ${UI.esc(w.topic)}</span>`);
-    if (w.hsk) bits.push(`<span class="pill pill--sky">HSK ${w.hsk}</span>`);
-    (w.lessons || []).filter(l => !/^hsk/.test(l) && l !== 'food').forEach(l => {
-      const les = Store.S.lessons.find(x => x.id === l);
-      if (les) bits.push(`<span class="pill pill--amber">${les.emoji} ${UI.esc(les.title)}</span>`);
+  function wireChrome(host, st) {
+    host.querySelector('#quit').addEventListener('click', () => confirmQuit(host, st));
+  }
+
+  function confirmQuit(host, st) {
+    if (st.ses.answered === 0) return App.go('#/today');
+    const s = UI.sheet(`
+      <div class="center">
+        ${Mascot.svg('sad', 92)}
+        <h3 style="font-size:19px;font-weight:800;margin-top:6px">Leave the lesson?</h3>
+        <p class="card__note" style="margin:6px 0 16px">
+          You'll keep the ${st.ses.xp} XP you've earned, but the rest of this
+          lesson won't count.</p>
+      </div>
+      <button class="btn btn--primary btn--block" id="stay">Keep going</button>
+      <button class="btn btn--ghost btn--block" id="leave" style="margin-top:9px;color:var(--bad)">
+        Leave</button>`);
+    s.querySelector('#stay').addEventListener('click', () => UI.closeSheet());
+    s.querySelector('#leave').addEventListener('click', () => {
+      UI.closeSheet();
+      Gamify.finish(st.ses);
+      App.go('#/today');
     });
-    return `<div class="wrap" style="justify-content:center;margin-top:12px">${bits.join('')}</div>`;
   }
 
-  function newFoot(w) {
-    return `
-      <div class="hstack">
-        <button class="btn btn--ghost flex1" id="skip">I know this</button>
-        <button class="btn btn--ghost" id="study" aria-label="Study the characters">
-          ${UI.icon('brush', 20)}
-        </button>
+  /* ---- hearts ------------------------------------------------------------------- */
+
+  function outOfHearts(host, st) {
+    return new Promise(resolve => {
+      const s = UI.sheet(`
+        <div class="center">
+          ${Mascot.svg('sad', 100)}
+          <h3 style="font-size:20px;font-weight:800;margin-top:6px">Out of hearts</h3>
+          <p class="card__note" style="margin:6px 0 16px">
+            Five slips this lesson. Take a breath — or carry on with a fresh set.</p>
+        </div>
+        <button class="btn btn--primary btn--block" id="refill">Carry on with 5 more</button>
+        <button class="btn btn--ghost btn--block" id="stopNow" style="margin-top:9px">
+          Finish the lesson here</button>
+        <p class="muted small center" style="margin-top:12px">
+          You can turn hearts off entirely in Me → Settings.</p>`);
+      s.querySelector('#refill').addEventListener('click', () => {
+        UI.closeSheet();
+        Gamify.refillHearts(st.ses);
+        resolve(true);
+      });
+      s.querySelector('#stopNow').addEventListener('click', () => {
+        UI.closeSheet();
+        resolve(false);
+      });
+    });
+  }
+
+  /* ---- empty and finished --------------------------------------------------------- */
+
+  function empty(host, mode) {
+    host.innerHTML = `
+      <div class="session__body">
+        ${Mascot.svg('proud', 128)}
+        <h2 style="font-size:24px;font-weight:800">
+          ${mode === 'mistakes' ? 'No mistakes to review' : 'Nothing due right now'}</h2>
+        <p class="card__note center" style="max-width:300px">
+          ${mode === 'mistakes'
+            ? "You've cleared everything you'd previously got wrong. Good going."
+            : "You're all caught up. Come back later, or pick a lesson from Study."}</p>
       </div>
-      <button class="btn btn--primary btn--block" id="got">Got it</button>`;
-  }
-
-  function reviewFoot(st, w) {
-    if (!st.revealed) {
-      return `<button class="btn btn--primary btn--block" id="reveal">Show answer</button>`;
-    }
-    const g = i => SRS.preview(w.id, i);
-    return `
-      <div class="grid grid--2" style="gap:9px">
-        <button class="btn btn--bad" data-grade="0">Again<br><span class="small"
-          style="font-weight:600;opacity:.85">${g(0)}</span></button>
-        <button class="btn" data-grade="1" style="background:var(--amber-soft);color:var(--amber-deep)">
-          Hard<br><span class="small" style="font-weight:600;opacity:.8">${g(1)}</span></button>
-        <button class="btn btn--good" data-grade="2">Good<br><span class="small"
-          style="font-weight:600;opacity:.85">${g(2)}</span></button>
-        <button class="btn" data-grade="3" style="background:var(--sky-soft);color:var(--sky)">
-          Easy<br><span class="small" style="font-weight:600;opacity:.8">${g(3)}</span></button>
+      <div class="session__foot">
+        <button class="btn btn--primary btn--block" onclick="location.hash='#/study'">Browse lessons</button>
+        <button class="btn btn--ghost btn--block" onclick="location.hash='#/today'">Back</button>
       </div>`;
   }
 
-  function wire(host, st, w, isNew) {
-    host.querySelector('#quit').addEventListener('click', () => App.go('#/today'));
-    host.querySelector('#say').addEventListener('click', () => Audio2.speak(w.hanzi));
+  function finish(host, st) {
+    const ses = st.ses;
+    const res = Gamify.finish(ses);
+    const secs = Math.round((Date.now() - st.t0) / 1000);
+    Store.dayEntry().seconds += secs;
+    Store.saveStats();
+    Cloud.push();
 
-    const reveal = host.querySelector('#reveal');
-    if (reveal) {
-      reveal.addEventListener('click', () => {
-        st.revealed = true;
-        host.querySelector('#answer').classList.remove('hidden');
-        host.querySelector('.ruby')?.classList.remove('ruby--hide');
-        host.querySelector('#foot').innerHTML = reviewFoot(st, w);
-        wireGrades(host, st, w);
-        Audio2.speak(w.hanzi);
-      });
-    }
+    const acc = ses.answered ? Math.round(ses.right / ses.answered * 100) : 0;
+    const great = acc >= 80 && ses.answered >= 5;
+    const badges = Gamify.checkBadges();
+    const lvl = Gamify.level();
+    const goal = Gamify.dailyGoal();
+    const today = Gamify.xpToday();
 
-    const got = host.querySelector('#got');
-    if (got) {
-      got.addEventListener('click', () => {
-        SRS.answer(w.id, 2);
-        st.learned++;
-        st.reviewed++;
-        st.right++;
-        Audio2.pop();
-        st.i++;
-        render(host, st);
-      });
-    }
-
-    const skip = host.querySelector('#skip');
-    if (skip) {
-      skip.addEventListener('click', () => {
-        SRS.markKnown(w.id);
-        UI.toast('Marked as known');
-        st.i++;
-        render(host, st);
-      });
-    }
-
-    const study = host.querySelector('#study');
-    if (study) study.addEventListener('click', () => App.go('#/char/' + encodeURIComponent(w.hanzi[0])));
-
-    if (!isNew) wireGrades(host, st, w);
-  }
-
-  function wireGrades(host, st, w) {
-    host.querySelectorAll('[data-grade]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const grade = +btn.dataset.grade;
-        SRS.answer(w.id, grade);
-        st.reviewed++;
-        if (grade > 0) { st.right++; Audio2.pop(); } else { Audio2.buzz(); }
-        Audio2.buzzPhone(grade > 0 ? 8 : [14, 40, 14]);
-        // A lapsed card comes back later in the same session.
-        if (grade === 0) st.queue.push(w);
-        st.i++;
-        render(host, st);
-      });
-    });
-  }
-
-  /* ---- finished ---------------------------------------------------------- */
-
-  function done(host, st) {
-    const acc = st.reviewed ? Math.round(st.right / st.reviewed * 100) : 0;
-    const streak = Store.liveStreak();
-    const c = SRS.counts();
-
-    if (st.reviewed >= 5) { UI.confetti(); Audio2.fanfare(); }
+    if (great || res.bonus) { UI.confetti(); Audio2.fanfare(); }
 
     host.innerHTML = `
-      <div class="session__body">
-        ${Mascot.svg(st.empty ? 'idle' : 'cheer', 132)}
-        <h2 style="font-size:26px;font-weight:800;margin-top:6px">
-          ${st.empty ? 'Nothing due right now' : '做得好！'}
-        </h2>
-        ${st.empty ? '' : `<div class="py">Zuò de hǎo! — Well done!</div>`}
+      <div class="session__body" style="justify-content:flex-start">
+        ${Mascot.svg(great ? 'cheer' : acc >= 50 ? 'proud' : 'think', 120)}
+        <h2 style="font-size:25px;font-weight:800">
+          ${res.bonus ? '完美！ Perfect lesson!' : great ? '做得好！ Well done!' : 'Lesson complete'}</h2>
 
-        ${st.empty ? `
-          <p class="card__note center" style="max-width:300px">
-            You've cleared everything scheduled for now. Come back later, or
-            keep going with free practice.</p>` : `
-          <div class="card" style="width:100%;display:flex;justify-content:space-around">
-            <div class="stat"><div class="stat__num">${st.reviewed}</div>
-              <div class="stat__label">Reviewed</div></div>
-            <div class="stat"><div class="stat__num" style="color:var(--mint)">${acc}%</div>
-              <div class="stat__label">Correct</div></div>
-            <div class="stat"><div class="stat__num" style="color:var(--amber-deep)">${st.learned}</div>
-              <div class="stat__label">New</div></div>
+        <div class="card" style="width:100%;display:flex;justify-content:space-around">
+          <div class="stat"><div class="stat__num" style="color:var(--amber-deep)">${res.total}</div>
+            <div class="stat__label">XP</div></div>
+          <div class="stat"><div class="stat__num" style="color:var(--mint)">${acc}%</div>
+            <div class="stat__label">Accuracy</div></div>
+          <div class="stat"><div class="stat__num" style="color:var(--coral)">${ses.bestCombo}</div>
+            <div class="stat__label">Best combo</div></div>
+        </div>
+
+        ${res.bonus ? `<div class="banner banner--good" style="width:100%">
+          ⭐️ No mistakes — +${res.bonus} XP bonus</div>` : ''}
+        ${res.levelled ? `<div class="banner banner--good" style="width:100%">
+          🎉 Level up! You're level ${res.level}</div>` : ''}
+
+        <div class="card" style="width:100%">
+          <div class="hstack" style="justify-content:space-between">
+            <span class="small" style="font-weight:800">Daily goal</span>
+            <span class="small muted">${Math.min(today, goal)} / ${goal} XP</span>
           </div>
-          <div class="chip chip--flame">🔥 ${streak} day streak</div>`}
+          <div class="bar" style="margin-top:8px">
+            <div class="bar__fill" style="width:${Math.min(100, today / goal * 100)}%"></div>
+          </div>
+          ${today >= goal ? `<p class="card__note" style="margin-top:8px;color:var(--mint);font-weight:700">
+            ✓ Goal hit — streak safe for today</p>` : `
+            <p class="card__note" style="margin-top:8px">${goal - today} XP to keep your streak.</p>`}
+        </div>
+
+        <div class="hstack" style="justify-content:center;gap:14px">
+          <span class="chip chip--flame">🔥 ${Store.liveStreak()}</span>
+          <span class="chip chip--amber">Level ${lvl.level}</span>
+        </div>
+
+        ${st.wrongWords.length ? `
+          <div class="card" style="width:100%;text-align:left">
+            <div class="card__title">Worth another look</div>
+            ${st.wrongWords.map(w => `
+              <button class="row" data-say="${UI.esc(w.hanzi)}" style="margin-top:8px">
+                <span class="row__lead hz" style="font-size:20px">${UI.esc(w.hanzi.slice(0, 3))}</span>
+                <span class="row__main">
+                  <span class="row__title">${UI.esc(w.english)}</span>
+                  <span class="row__sub">${UI.esc(w.pinyin)}</span>
+                </span>
+                ${UI.icon('sound', 17)}
+              </button>`).join('')}
+          </div>` : ''}
       </div>
 
       <div class="session__foot">
-        ${c.due + c.fresh > 0
-          ? `<button class="btn btn--primary btn--block" id="more">Keep going · ${c.due + c.fresh} left</button>`
-          : `<button class="btn btn--primary btn--block" id="practise">Free practice</button>`}
+        <button class="btn btn--primary btn--block" id="again">Another lesson</button>
         <button class="btn btn--ghost btn--block" id="home">Done for now</button>
       </div>`;
 
+    host.querySelectorAll('[data-say]').forEach(b =>
+      b.addEventListener('click', () => Audio2.speak(b.dataset.say)));
     host.querySelector('#home').addEventListener('click', () => App.go('#/today'));
-    host.querySelector('#more')?.addEventListener('click', () => Views.session(host));
-    host.querySelector('#practise')?.addEventListener('click', () => App.go('#/practice'));
+    host.querySelector('#again').addEventListener('click', () =>
+      Views.session(host, st.mode === 'lesson' ? ['lesson', st.queue[0].word.lessons[0]] : []));
+
+    Gamify.celebrate(badges);
   }
 })();

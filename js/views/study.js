@@ -84,9 +84,24 @@
 
       <div class="card card--amber">
         <p class="card__note">${UI.esc(lesson.subtitle)}</p>
-        <div class="hstack" style="margin-top:12px">
-          <button class="btn btn--primary btn--sm flex1" id="quiz">Quiz me on these</button>
-          <button class="btn btn--ghost btn--sm" id="playAll">${UI.icon('play', 16)} Play all</button>
+        ${(() => {
+          const cr = Views.today.crowns(id);
+          return `
+            <div class="hstack" style="justify-content:space-between;margin-top:10px">
+              <span class="small" style="font-weight:800">${cr.started}/${cr.total} words started</span>
+              <span class="small">${cr.n ? '👑'.repeat(cr.n) : '<span class="muted">no crowns yet</span>'}</span>
+            </div>
+            <div class="bar" style="height:8px;margin-top:6px">
+              <div class="bar__fill" style="width:${cr.pct * 100}%"></div>
+            </div>`;
+        })()}
+        <button class="btn btn--primary btn--block" id="learn" style="margin-top:12px">
+          ${SRS.pool({ lesson: id }).some(w => !SRS.has(w.id)) ? 'Start lesson' : 'Practise this lesson'}
+        </button>
+        <div class="hstack" style="margin-top:9px">
+          <button class="btn btn--ghost btn--sm flex1" id="quiz">Quick quiz</button>
+          <button class="btn btn--ghost btn--sm flex1" id="matchIt">⚡️ Match up</button>
+          <button class="btn btn--ghost btn--sm" id="playAll">${UI.icon('play', 16)}</button>
         </div>
       </div>
 
@@ -109,8 +124,14 @@
       }).join('')}`;
 
     host.querySelector('#back').addEventListener('click', () => App.go('#/study'));
+    host.querySelector('#learn').addEventListener('click', () => {
+      Audio2.unlock();
+      App.go(`#/session/lesson/${encodeURIComponent(id)}`);
+    });
     host.querySelector('#quiz').addEventListener('click', () =>
       App.go(`#/quiz/meaning/lesson/${encodeURIComponent(id)}`));
+    host.querySelector('#matchIt').addEventListener('click', () =>
+      App.go(`#/match/lesson/${encodeURIComponent(id)}`));
     host.querySelector('#playAll').addEventListener('click', () => playAll(words));
     host.querySelectorAll('[data-word]').forEach(b =>
       b.addEventListener('click', () => wordSheet(b.dataset.word)));

@@ -8,6 +8,7 @@ animals lesson: head of a horse, antlers of a deer, hooves of an ox, tail of a
 donkey. It went extinct in China and was brought back from Europe.
 
 **→ [SETUP.md](SETUP.md) for how to get it on your home screen.**
+**→ [NEXT-STEPS.md](NEXT-STEPS.md) for what's done and what's worth building next.**
 
 ## What's in it
 
@@ -20,13 +21,25 @@ sentence patterns, all taken from the lessons.
 
 | | |
 |---|---|
-| **Today** | Streak, what's due, and a study session that mixes reviews with ten new words a day |
+| **Today** | Daily XP goal, streak, level, the learning path, and mistakes to fix |
 | **Study** | The eleven lessons as browsable decks, the dialogues with a role-play mode, and the grammar patterns |
-| **Practice** | Four quiz directions, tone training, speaking, sentence building, writing |
+| **Practice** | Match-up game, four quiz directions, tone training, speaking, sentence building, writing |
 | **Hanzi** | Every character: stroke-order animation, finger tracing, and what it's built from |
-| **Me** | Progress, family leaderboard, settings, and importing new decks |
+| **Me** | Level, achievements, progress, family leaderboard, settings, importing new decks |
 
 ### The parts worth knowing about
+
+**Lessons mix exercise types.** A word isn't drilled the same way twice. There
+are nine exercise types and `Exercises.pick()` chooses one based on how well you
+know that word: recognise it (pick the meaning, pick what you heard), then
+recall it (pick the characters, identify the tone), then produce it (type the
+pinyin, write the character, say it aloud). Production exercises are flagged
+"harder" and pay bonus XP. Nothing repeats back to back.
+
+**Hearts, XP and combos.** Five mistakes per lesson, a daily XP goal that keeps
+the streak alive, a combo bonus for runs of correct answers, sixteen
+achievements, and levels. Hearts can be switched off in settings if they annoy
+you.
 
 **Pinyin fades out.** New words show pinyin above the characters. Once you've
 got a word right three times running it disappears, so you drift onto reading

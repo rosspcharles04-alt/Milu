@@ -3,7 +3,7 @@
    Everything is precached on install, so after the first visit the app runs
    entirely from the phone. Bump VERSION whenever you deploy to force a refresh. */
 
-const VERSION = 'milu-v1';
+const VERSION = 'milu-v2';
 const CACHE = VERSION;
 
 const ASSETS = [
@@ -24,9 +24,12 @@ const ASSETS = [
   './js/speech.js',
   './js/pptx.js',
   './js/cloud.js',
+  './js/gamify.js',
+  './js/exercises.js',
   './js/app.js',
   './js/views/today.js',
   './js/views/session.js',
+  './js/views/match.js',
   './js/views/study.js',
   './js/views/practice.js',
   './js/views/quiz.js',

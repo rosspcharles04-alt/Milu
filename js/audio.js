@@ -15,28 +15,68 @@
 
   /* ---- voice selection --------------------------------------------------- */
 
+  // Ross downloads the premium "Han" voice on his iPhone, so prefer it by name.
+  // Others are listed after it as sensible fallbacks on devices that lack it.
+  const PREFERRED_NAMES = ['han', 'li-mu', 'yu-shu', 'tingting', 'ting-ting'];
+
+  /** Rough quality ranking from whatever the platform puts in the voice name. */
+  function quality(v) {
+    const s = `${v.name || ''} ${v.voiceURI || ''}`.toLowerCase();
+    if (/premium/.test(s)) return 3;
+    if (/enhanced|siri/.test(s)) return 2;
+    if (/compact/.test(s)) return 0;
+    return 1;
+  }
+
+  function qualityLabel(v) {
+    return ['Compact', 'Standard', 'Enhanced', 'Premium'][quality(v)];
+  }
+
   function pickVoice() {
     voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
-    const zh = voices.filter(v => /^zh([-_]|$)/i.test(v.lang || ''));
+    const zh = chineseVoices();
+    if (!zh.length) { zhVoice = null; return null; }
 
-    const chosen = Store.S.settings.voiceURI;
-    if (chosen) {
-      const match = zh.find(v => v.voiceURI === chosen);
-      if (match) { zhVoice = match; return zhVoice; }
+    // 1. An explicit choice from Settings wins. Match on URI first, then on
+    //    name — voice URIs differ between devices and change across iOS
+    //    updates, so the name is what actually survives.
+    const S = Store.S.settings;
+    if (S.voiceURI) {
+      const byUri = zh.find(v => v.voiceURI === S.voiceURI);
+      if (byUri) { zhVoice = byUri; return zhVoice; }
+    }
+    if (S.voiceName) {
+      const byName = zh.find(v => v.name === S.voiceName) ||
+                     zh.find(v => (v.name || '').toLowerCase().includes(S.voiceName.toLowerCase()));
+      if (byName) { zhVoice = byName; return zhVoice; }
     }
 
-    // Prefer mainland Mandarin, and prefer the higher-quality voices iOS ships.
-    const mainland = zh.filter(v => /zh[-_]CN|zh[-_]Hans/i.test(v.lang));
+    // 2. Otherwise pick the best available, favouring mainland Mandarin.
+    const mainland = zh.filter(v => /zh[-_](CN|Hans)/i.test(v.lang));
     const list = mainland.length ? mainland : zh;
-    zhVoice =
-      list.find(v => /premium|enhanced|siri/i.test(v.name || v.voiceURI || '')) ||
-      list.find(v => v.localService) ||
-      list[0] || null;
+
+    const scored = list.slice().sort((a, b) => {
+      const rank = v => {
+        const n = (v.name || '').toLowerCase();
+        const i = PREFERRED_NAMES.findIndex(p => n.includes(p));
+        return i === -1 ? PREFERRED_NAMES.length : i;
+      };
+      // Higher quality first, then our name preference, then local voices.
+      return (quality(b) - quality(a)) || (rank(a) - rank(b)) ||
+             ((b.localService ? 1 : 0) - (a.localService ? 1 : 0));
+    });
+
+    zhVoice = scored[0] || null;
     return zhVoice;
   }
 
   function chineseVoices() {
     return voices.filter(v => /^zh([-_]|$)/i.test(v.lang || ''));
+  }
+
+  /** True when the chosen voice is one of the good downloadable ones. */
+  function voiceIsPremium() {
+    return !!zhVoice && quality(zhVoice) >= 2;
   }
 
   function init() {
@@ -164,7 +204,7 @@
 
   window.Audio2 = {
     init, unlock, speak, stop, available,
-    pickVoice, chineseVoices,
+    pickVoice, chineseVoices, quality, qualityLabel, voiceIsPremium,
     get voice() { return zhVoice; },
     ding, buzz, pop, fanfare, buzzPhone,
   };

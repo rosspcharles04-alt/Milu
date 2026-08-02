@@ -1,0 +1,6 @@
+# Downloaded stroke-order data, re-fetched by build/build_data.py on demand.
+build/.stroke_cache/
+
+.DS_Store
+*.pyc
+__pycache__/
