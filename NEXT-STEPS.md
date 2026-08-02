@@ -1,11 +1,22 @@
 # Mílù — what's done, what's next
 
-Paste any unticked item below into Claude (Chrome, or Claude Code in this
-folder) and it has enough context to do the work without re-reading everything.
+The roadmap. Each unticked item below is written to stand alone, so you can hand
+any one of them over and the work can start without re-reading the whole app.
 
 **Repo layout is in [README.md](README.md). Deploy steps are in [SETUP.md](SETUP.md).**
-After any change: bump `VERSION` in `sw.js` (currently `milu-v2`) or phones keep
-serving the cached old copy.
+
+### Deploying a change
+
+```bash
+cd "/Users/rosscharles/Documents/Claude AI/Personal/Chinese Learning/milu"
+git add -A && git commit -m "what changed" && git push
+```
+
+Bump `VERSION` in `sw.js` first (currently `milu-v3`) or phones keep serving the
+cached old copy. GitHub Pages rebuilds in a minute or two; installed home-screen
+apps pick the new version up next time they're opened on wifi.
+
+Live at **https://rosspcharles04-alt.github.io/Milu/**
 
 ---
 
