@@ -8,10 +8,13 @@
   const Views = window.Views = window.Views || {};
 
   const LESSON_LEN = 14;   // exercises per lesson, ~5 minutes
+  const MAX_RETRIES = 1;   // times a missed word comes back within the lesson
+  const MAX_QUEUE = 22;    // hard ceiling so a bad run still ends
 
   /**
    * @param args  []              the daily mix
    *              ['lesson', id]  one deck
+   *              ['topic', name] one topic
    *              ['mistakes']    only words previously got wrong
    */
   Views.session = async function (host, args) {
@@ -23,9 +26,15 @@
 
     await Hanzi.load().catch(() => {});   // so tracing exercises are available
 
+    const filter = mode === 'lesson' ? { lesson: args[1] }
+                 : mode === 'topic'  ? { topic: args[1] }
+                 : null;
+
     const st = {
       mode,
-      pool: SRS.pool(mode === 'lesson' ? { lesson: args[1] } : null),
+      arg: args[1] || null,
+      lessonId: mode === 'lesson' ? args[1] : null,
+      pool: SRS.pool(filter),
       queue: words.map(w => ({ word: w, kind: null })),
       i: 0,
       lastKind: null,
@@ -38,14 +47,27 @@
     run(host, st);
   };
 
+  /**
+   * Should a missed word come back later in this lesson?
+   *
+   * Duolingo re-asks what you got wrong, but re-queueing on *every* miss makes
+   * the queue grow exactly as fast as the learner works through it, so the
+   * lesson never ends — with hearts switched off it runs forever. Allowing one
+   * retry per word, under a hard ceiling, keeps the second chance and
+   * guarantees termination.
+   */
+  function shouldRequeue(retries, queueLength) {
+    return retries <= MAX_RETRIES && queueLength < MAX_QUEUE;
+  }
+
   /* ---- building the queue ----------------------------------------------------- */
 
   function buildQueue(mode, id) {
     if (mode === 'mistakes') {
       return Gamify.mistakeList().slice(0, LESSON_LEN).map(m => m.word);
     }
-    if (mode === 'lesson') {
-      const all = SRS.pool({ lesson: id });
+    if (mode === 'lesson' || mode === 'topic') {
+      const all = SRS.pool(mode === 'lesson' ? { lesson: id } : { topic: id });
       // Unseen words first, then whatever is due, then a refresher.
       const unseen = all.filter(w => !SRS.has(w.id));
       const due = all.filter(w => {
@@ -94,8 +116,11 @@
         SRS.answer(word.id, 0);
         Gamify.logMistake(word.id, kind);
         if (!st.wrongWords.includes(word)) st.wrongWords.push(word);
-        // Duolingo brings a missed item back before the lesson ends.
-        st.queue.push({ word, kind: null });
+
+        step.retries = (step.retries || 0) + 1;
+        if (shouldRequeue(step.retries, st.queue.length)) {
+          st.queue.push({ word, kind: null, retries: step.retries });
+        }
       }
 
       st.i++;
@@ -273,8 +298,12 @@
       b.addEventListener('click', () => Audio2.speak(b.dataset.say)));
     host.querySelector('#home').addEventListener('click', () => App.go('#/today'));
     host.querySelector('#again').addEventListener('click', () =>
-      Views.session(host, st.mode === 'lesson' ? ['lesson', st.queue[0].word.lessons[0]] : []));
+      Views.session(host, st.arg ? [st.mode, st.arg] : []));
 
     Gamify.celebrate(badges);
   }
+
+  // Exposed for the test suite.
+  Views.session.shouldRequeue = shouldRequeue;
+  Views.session.LIMITS = { LESSON_LEN, MAX_RETRIES, MAX_QUEUE };
 })();

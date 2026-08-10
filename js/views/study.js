@@ -99,9 +99,9 @@
           ${SRS.pool({ lesson: id }).some(w => !SRS.has(w.id)) ? 'Start lesson' : 'Practise this lesson'}
         </button>
         <div class="hstack" style="margin-top:9px">
-          <button class="btn btn--ghost btn--sm flex1" id="quiz">Quick quiz</button>
           <button class="btn btn--ghost btn--sm flex1" id="matchIt">⚡️ Match up</button>
-          <button class="btn btn--ghost btn--sm" id="playAll">${UI.icon('play', 16)}</button>
+          <button class="btn btn--ghost btn--sm flex1" id="playAll">
+            ${UI.icon('play', 16)} Play all</button>
         </div>
       </div>
 
@@ -128,8 +128,6 @@
       Audio2.unlock();
       App.go(`#/session/lesson/${encodeURIComponent(id)}`);
     });
-    host.querySelector('#quiz').addEventListener('click', () =>
-      App.go(`#/quiz/meaning/lesson/${encodeURIComponent(id)}`));
     host.querySelector('#matchIt').addEventListener('click', () =>
       App.go(`#/match/lesson/${encodeURIComponent(id)}`));
     host.querySelector('#playAll').addEventListener('click', () => playAll(words));

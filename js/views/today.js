@@ -119,16 +119,6 @@
           <span class="tile__label">Tones</span>
           <span class="tile__sub">Train your ear</span>
         </button>
-        <button class="tile" data-go="#/speak">
-          <span class="tile__emoji">🎤</span>
-          <span class="tile__label">Speaking</span>
-          <span class="tile__sub">Check your tone</span>
-        </button>
-        <button class="tile" data-go="#/sentences">
-          <span class="tile__emoji">🧩</span>
-          <span class="tile__label">Sentences</span>
-          <span class="tile__sub">Build them up</span>
-        </button>
       </div>
 
       <div class="section-title">Your path</div>

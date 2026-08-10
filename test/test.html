@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mílù tests</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px;
+         background: #FFF7EF; color: #3B2A21; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 18px 0 6px; text-transform: uppercase;
+       letter-spacing: .06em; color: #9C8676; }
+  .r { padding: 3px 0 3px 22px; position: relative; border-bottom: 1px solid #F0DFCF; }
+  .r::before { position: absolute; left: 0; font-weight: 700; }
+  .pass::before { content: "✓"; color: #3E9B78; }
+  .fail::before { content: "✗"; color: #D0453F; }
+  .fail { background: #FBDEDD; }
+  .detail { color: #9C8676; font-size: 12.5px; }
+  #summary { position: sticky; top: 0; background: #FFF7EF; padding: 10px 0;
+             font-weight: 800; font-size: 16px; border-bottom: 2px solid #3B2A21; z-index: 2; }
+  code { background: #FFEFE1; padding: 1px 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Mílù test suite</h1>
+<div id="summary">running…</div>
+<div id="out"></div>
+
+<!-- The app, loaded exactly as index.html does -->
+<script src="../vendor/hanzi-writer.min.js"></script>
+<script src="../js/config.js"></script>
+<script src="../js/mascot.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/srs.js"></script>
+<script src="../js/audio.js"></script>
+<script src="../js/ui.js"></script>
+<script src="../js/hanzi.js"></script>
+<script src="../js/pitch.js"></script>
+<script src="../js/speech.js"></script>
+<script src="../js/pptx.js"></script>
+<script src="../js/cloud.js"></script>
+<script src="../js/gamify.js"></script>
+<script src="../js/views/today.js"></script>
+<script src="../js/views/session.js"></script>
+<script src="../js/views/match.js"></script>
+<script src="../js/views/study.js"></script>
+<script src="../js/views/practice.js"></script>
+<script src="../js/views/chars.js"></script>
+<script src="../js/views/tones.js"></script>
+<script src="../js/views/speak.js"></script>
+<script src="../js/views/sentences.js"></script>
+<script src="../js/views/import.js"></script>
+<script src="../js/views/me.js"></script>
+<script src="../js/exercises.js"></script>
+
+<script>
+/* Data files sit one level up from /test/. */
+(function () {
+  const origFetch = window.fetch;
+  window.fetch = (url, opts) =>
+    origFetch(typeof url === 'string' && url.startsWith('data/') ? '../' + url : url, opts);
+})();
+
+let pass = 0, fail = 0;
+const out = document.getElementById('out');
+
+function section(name) {
+  out.insertAdjacentHTML('beforeend', `<h2>${name}</h2>`);
+}
+function ok(cond, label, detail) {
+  const good = !!cond;
+  good ? pass++ : fail++;
+  out.insertAdjacentHTML('beforeend',
+    `<div class="r ${good ? 'pass' : 'fail'}">${label}` +
+    (detail ? ` <span class="detail">— ${detail}</span>` : '') + `</div>`);
+  return good;
+}
+function eq(a, b, label) {
+  return ok(JSON.stringify(a) === JSON.stringify(b), label,
+    JSON.stringify(a) === JSON.stringify(b) ? '' : `got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`);
+}
+
+function freshProgress() {
+  Store.S.progress = {};
+  Store.S.stats = { streak: 0, longest: 0, lastDay: null, days: {}, totalReviews: 0,
+                    xp: 0, mistakes: {}, badges: {}, speakAttempts: 0,
+                    perfectLessons: 0, bestCombo: 0 };
+  Store.S.chars = {};
+}
+
+async function run() {
+  await Store.load();
+  await Hanzi.load();
+
+  /* ---- data integrity ---------------------------------------------------- */
+  section('Data');
+  const V = Store.S.vocab;
+  ok(V.length > 400, 'vocabulary loaded', `${V.length} words`);
+  ok(new Set(V.map(w => w.id)).size === V.length, 'no duplicate word ids');
+  ok(V.every(w => w.hanzi && w.english), 'every word has characters and a meaning');
+  const noPinyin = V.filter(w => !w.pinyin);
+  ok(noPinyin.length === 0, 'every word has pinyin',
+     noPinyin.length ? noPinyin.slice(0,3).map(w=>w.hanzi).join(' ') : '');
+  const badUnits = V.filter(w => w.units.some(u => u.p === '' && /[一-鿿]/.test(u.c)));
+  ok(badUnits.length === 0, 'every character has an aligned syllable',
+     badUnits.length ? badUnits.slice(0,4).map(w=>w.hanzi).join(' ') : '');
+  const badTone = V.filter(w => w.tones.some(t => t < 1 || t > 5));
+  ok(badTone.length === 0, 'tone numbers are all 1-5');
+  const missingStrokes = [...new Set(V.flatMap(w => w.chars))]
+    .filter(c => !Store.S.strokes[c]);
+  ok(missingStrokes.length === 0, 'stroke data exists for every character',
+     missingStrokes.join('') || '');
+  ok(Store.S.dialogues.length >= 8, 'dialogues loaded', Store.S.dialogues.length);
+  ok(Store.S.patterns.length >= 10, 'sentence patterns loaded', Store.S.patterns.length);
+  ok(Store.S.tones.tones.length === 5, 'five tone shapes');
+  ok(Store.S.tones.sandhi.length >= 3, 'sandhi rules loaded');
+
+  /* ---- SRS scheduler ------------------------------------------------------ */
+  section('Spaced repetition');
+  freshProgress();
+  const id = V[0].id;
+
+  let c = SRS.card(id);
+  eq(c.state, 'new', 'a fresh card starts as new');
+
+  SRS.answer(id, 2);
+  c = SRS.card(id);
+  ok(c.state === 'learning' || c.state === 'review', 'answering "good" moves it out of new', c.state);
+
+  freshProgress();
+  SRS.answer(id, 3);
+  eq(SRS.card(id).state, 'review', '"easy" graduates immediately');
+  ok(SRS.card(id).interval >= 4, '"easy" gives at least a 4-day interval', SRS.card(id).interval);
+
+  freshProgress();
+  SRS.answer(id, 2); SRS.answer(id, 2); SRS.answer(id, 2);
+  const grown = SRS.card(id);
+  ok(grown.state === 'review', 'three "good"s reach review state');
+  const before = grown.interval;
+  SRS.answer(id, 2);
+  ok(SRS.card(id).interval > before, 'intervals grow on success',
+     `${before.toFixed(1)} → ${SRS.card(id).interval.toFixed(1)}`);
+
+  const easeBefore = SRS.card(id).ease;
+  SRS.answer(id, 0);
+  ok(SRS.card(id).ease < easeBefore, 'a lapse reduces ease');
+  eq(SRS.card(id).state, 'relearning', 'a lapse sends it to relearning');
+  ok(SRS.card(id).due - Date.now() < 60 * 60 * 1000, 'a lapsed card returns within the hour');
+
+  freshProgress();
+  SRS.markKnown(id);
+  ok(SRS.card(id).interval >= 14, '"I know this" schedules it far out', SRS.card(id).interval);
+
+  freshProgress();
+  ok(SRS.preview(id, 0) !== SRS.preview(id, 3), 'grade previews differ',
+     `again=${SRS.preview(id,0)} easy=${SRS.preview(id,3)}`);
+
+  freshProgress();
+  const sess = SRS.session(14);
+  ok(sess.length > 0 && sess.length <= 14, 'a session is capped at the requested size', sess.length);
+  ok(new Set(sess.map(w => w.id)).size === sess.length, 'no duplicate words in one session');
+
+  freshProgress();
+  Store.S.settings.newPerDay = 5;
+  ok(SRS.newRemainingToday() === 5, 'new-per-day budget respected');
+  SRS.session(20).slice(0, 5).forEach(w => SRS.answer(w.id, 2));
+  ok(SRS.newRemainingToday() <= 5, 'budget decreases as new words are learned',
+     SRS.newRemainingToday());
+  Store.S.settings.newPerDay = 10;
+
+  /* ---- pinyin alignment ---------------------------------------------------- */
+  section('Pinyin');
+  const cases = [
+    ['你好', 'nǐ hǎo', ['nǐ','hǎo'], [3,3]],
+    ['麋鹿', 'mílù', ['mí','lù'], [2,4]],
+    ['哪儿', 'nǎr', ['nǎ','r'], [3,5]],
+    ['星期二', "xīngqī'èr", ['xīng','qī','èr'], [1,1,4]],
+    ['网约车', 'wǎngyuēchē', ['wǎng','yuē','chē'], [3,1,1]],
+    ['学生', 'xuéshēng', ['xué','shēng'], [2,1]],
+  ];
+  cases.forEach(([hz, py, syl, tones]) => {
+    const u = Import.units(hz, py);
+    eq(u.map(x => x.p), syl, `${hz} splits correctly`);
+    eq(u.map(x => x.t), tones, `${hz} tones correct`);
+  });
+  ok(Import.units('T恤', 'T xù').length === 2, 'T恤 aligns despite the Latin letter');
+
+  /* ---- typed pinyin matching ------------------------------------------------ */
+  section('Typed answers');
+  const P = Exercises.plainPinyin;
+  ok(P('nǐ hǎo') === P('ni hao'), 'tone marks optional');
+  ok(P('NI HAO') === P('ni hao'), 'case insensitive');
+  ok(P('ni3 hao3') === P('ni hao'), 'tone numbers ignored');
+  ok(P('nǐhǎo') === P('ni hao'), 'spacing ignored');
+  ok(P('lǜchá') === P('lvcha'), 'ü accepted as v');
+  ok(P('ni hao') !== P('ni hai'), 'genuinely different answers still differ');
+
+  /* ---- exercise selection ---------------------------------------------------- */
+  section('Exercise selection');
+  freshProgress();
+  const w0 = V[0];
+  eq(Exercises.pick(w0, null), 'teach', 'a brand-new word gets the teach card');
+  eq(Exercises.strength(w0), 0, 'a brand-new word has strength 0');
+
+  const now = Date.now();
+  Store.S.progress[w0.id] = { state:'review', step:0, ease:2.5, interval:14,
+    due: now, reps:5, lapses:0, seen:5, correct:5, streak:5, last:now };
+  eq(Exercises.strength(w0), 3, 'a well-known word reaches strength 3');
+
+  let repeats = 0, last = null;
+  const kinds = new Set();
+  for (let i = 0; i < 300; i++) {
+    const k = Exercises.pick(w0, last);
+    if (k === last) repeats++;
+    kinds.add(k);
+    last = k;
+  }
+  ok(repeats === 0, 'the same exercise never appears twice in a row');
+  ok(kinds.size >= 4, 'strong words draw from several exercise types', [...kinds].join(', '));
+  ok(kinds.has('type_pin') || kinds.has('trace') || kinds.has('speak'),
+     'strong words get production exercises');
+
+  Store.S.progress[w0.id].streak = 2;
+  Store.S.progress[w0.id].interval = 3;
+  eq(Exercises.strength(w0), 2, 'a middling word has strength 2');
+
+  ok(!Exercises.supported('tone_id', { tones: [1,2], chars:['x'], pinyin:'x' }),
+     'tone ID is skipped for multi-syllable words');
+  ok(Exercises.supported('tone_id', { tones: [3], chars:['我'], pinyin:'wǒ' }),
+     'tone ID works for single syllables');
+
+  /* ---- gamification ----------------------------------------------------------- */
+  section('XP, hearts, levels');
+  freshProgress();
+  const ses = Gamify.newSession();
+  eq(ses.hearts, 5, 'a lesson starts with five hearts');
+
+  let r = Gamify.score(ses, true, false);
+  ok(r.xp > 0, 'a correct answer earns XP', r.xp);
+  eq(ses.combo, 1, 'combo increments');
+
+  const hardXP = Gamify.score(Gamify.newSession(), true, true).xp;
+  const easyXP = Gamify.score(Gamify.newSession(), true, false).xp;
+  ok(hardXP > easyXP, 'harder exercises pay more', `${hardXP} vs ${easyXP}`);
+
+  r = Gamify.score(ses, false, false);
+  eq(ses.combo, 0, 'a mistake resets the combo');
+  eq(ses.hearts, 4, 'a mistake costs a heart');
+
+  const dying = Gamify.newSession();
+  for (let i = 0; i < 5; i++) Gamify.score(dying, false, false);
+  ok(dying.hearts <= 0, 'five mistakes exhausts the hearts');
+  ok(Gamify.score(dying, false, false).dead, 'running out is reported');
+
+  const noHearts = Gamify.newSession({ noHearts: true });
+  eq(noHearts.hearts, Infinity, 'hearts can be disabled');
+
+  freshProgress();
+  eq(Gamify.level().level, 1, 'everyone starts at level 1');
+  Gamify.addXP(100000);
+  ok(Gamify.level().level > 5, 'lots of XP raises the level', 'level ' + Gamify.level().level);
+  const L = Gamify.level();
+  ok(L.into < L.need, 'progress within a level is under the threshold');
+
+  freshProgress();
+  const perfect = Gamify.newSession();
+  for (let i = 0; i < 6; i++) Gamify.score(perfect, true, false);
+  ok(Gamify.finish(perfect).bonus > 0, 'a flawless lesson pays a bonus');
+
+  const sloppy = Gamify.newSession();
+  for (let i = 0; i < 6; i++) Gamify.score(sloppy, i !== 0, false);
+  eq(Gamify.finish(sloppy).bonus, 0, 'a lesson with a mistake gets no bonus');
+
+  /* ---- lesson termination -------------------------------------------------------- */
+  section('Lessons always end');
+  const { MAX_RETRIES, MAX_QUEUE, LESSON_LEN } = Views.session.LIMITS;
+  const requeue = Views.session.shouldRequeue;
+  ok(requeue(1, 14), 'a first miss earns a second chance');
+  ok(!requeue(MAX_RETRIES + 1, 14), 'a word is not re-asked forever');
+  ok(!requeue(1, MAX_QUEUE), 'the queue has a hard ceiling');
+  ok(MAX_QUEUE < Infinity && MAX_QUEUE >= LESSON_LEN, 'the ceiling is finite and above the lesson length');
+
+  // Simulate the worst case: every single answer wrong.
+  let q = LESSON_LEN, i = 0, guard = 0;
+  const retries = {};
+  while (i < q && guard++ < 5000) {
+    retries[i] = (retries[i] || 0) + 1;
+    if (requeue(retries[i], q)) q++;
+    i++;
+  }
+  ok(guard < 5000, 'getting everything wrong still terminates',
+     `ended after ${i} exercises, queue grew to ${q}`);
+  ok(q <= MAX_QUEUE + 1, 'the queue never exceeds the ceiling', `peaked at ${q}`);
+
+  /* ---- mistakes ---------------------------------------------------------------- */
+  section('Mistakes');
+  freshProgress();
+  Gamify.logMistake(V[1].id, 'choose_mean');
+  Gamify.logMistake(V[1].id, 'listen');
+  Gamify.logMistake(V[2].id, 'listen');
+  eq(Gamify.mistakeList().length, 2, 'mistakes are tracked per word');
+  eq(Gamify.mistakeList()[0].id, V[1].id, 'the worst offender sorts first');
+  Gamify.clearMistake(V[1].id);
+  eq(Gamify.mistakeList().length, 1, 'getting it right clears the mistake');
+
+  /* ---- streaks ------------------------------------------------------------------ */
+  section('Streaks');
+  freshProgress();
+  eq(Store.liveStreak(), 0, 'no streak before studying');
+  Store.touchStreak();
+  eq(Store.liveStreak(), 1, 'studying today starts a streak');
+  Store.touchStreak();
+  eq(Store.liveStreak(), 1, 'studying twice in a day does not double it');
+
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  Store.S.stats.lastDay = ymd(y);
+  Store.S.stats.streak = 4;
+  Store.touchStreak();
+  eq(Store.S.stats.streak, 5, 'studying the next day extends the streak');
+
+  const old = new Date(); old.setDate(old.getDate() - 5);
+  Store.S.stats.lastDay = ymd(old);
+  Store.S.stats.streak = 9;
+  eq(Store.liveStreak(), 0, 'a gap breaks the streak');
+  Store.touchStreak();
+  eq(Store.S.stats.streak, 1, 'studying after a gap restarts at 1');
+
+  /* ---- tone analysis -------------------------------------------------------------- */
+  section('Tone analysis');
+  const SR = 44100;
+  [98, 147, 220, 330].forEach(f0 => {
+    const buf = new Float32Array(2048);
+    for (let i = 0; i < buf.length; i++) {
+      const t = i / SR;
+      buf[i] = .5*Math.sin(2*Math.PI*f0*t) + .3*Math.sin(4*Math.PI*f0*t) + .18*Math.sin(6*Math.PI*f0*t);
+    }
+    const got = Pitch.detectF0(buf, SR).hz;
+    ok(Math.abs(got - f0) / f0 < 0.03, `pitch detection at ${f0} Hz`, `read ${got.toFixed(0)} Hz`);
+  });
+  ok(Pitch.detectF0(new Float32Array(2048), SR).hz === 0, 'silence reads as unvoiced');
+
+  const T = Store.S.tones.tones;
+  const simulate = (shape, baseHz) => {
+    const frames = [{ t: 0, hz: 0, rms: .002 }];
+    for (let i = 0; i < 40; i++) {
+      const f = i / 39, pos = f * (shape.length - 1);
+      const a = Math.floor(pos), b = Math.min(a + 1, shape.length - 1);
+      const v = shape[a] + (shape[b] - shape[a]) * (pos - a);
+      frames.push({ t: i * .016, hz: baseHz * Math.pow(2, v * 10 / 12) * (1 + (Math.random()-.5)*.02), rms: .09 });
+    }
+    frames.push({ t: 9, hz: 0, rms: .002 });
+    return Pitch.normalise(Pitch.cleanContour(frames), 5);
+  };
+  [1,2,3,4].forEach(tone => {
+    const shape = T.find(x => x.tone === tone).contour;
+    [['a low voice',110], ['a high voice',240]].forEach(([who, hz]) => {
+      const n = simulate(shape, hz);
+      const self = Pitch.compare(n.points, shape).score;
+      const others = [1,2,3,4].filter(t => t !== tone)
+        .map(t => Pitch.compare(n.points, T.find(x=>x.tone===t).contour).score);
+      ok(self >= 80, `tone ${tone} scores well in ${who}`, `${self}%`);
+      ok(self > Math.max(...others), `tone ${tone} beats the other tones in ${who}`,
+         `${self} vs max ${Math.max(...others)}`);
+    });
+  });
+
+  const sandhi = Views.speak.applySandhi([3,3]);
+  eq(sandhi, [2,3], '3+3 sandhi applied');
+  eq(Views.speak.applySandhi([1,4]), [1,4], 'other tone pairs untouched');
+  eq(Views.speak.targetContour([1]).points.length, 5, 'a one-syllable target has 5 points');
+  eq(Views.speak.targetContour([1,2]).points.length, 10, 'a two-syllable target has 10');
+
+  /* ---- character fitting ------------------------------------------------------------ */
+  section('Character sizing');
+  const box = document.createElement('div');
+  box.style.cssText = 'position:absolute;left:-9999px;width:343px';
+  document.body.appendChild(box);
+  [1,2,3,4,5,6].forEach(n => {
+    const w = V.slice().sort((a,b)=>b.units.length-a.units.length).find(x => x.units.length === n);
+    if (!w) return;
+    box.innerHTML = UI.ruby(w, { cap: 96 });
+    const el = box.querySelector('.ruby');
+    ok(el.scrollWidth <= 344, `${w.hanzi} (${n} chars) fits a 343px column`,
+       `${el.scrollWidth}px`);
+  });
+  box.remove();
+
+  /* ---- sentence segmentation -------------------------------------------------------- */
+  section('Sentences');
+  Store.S.patterns.forEach(p => p.examples.forEach(ex => {
+    const joined = ex.words.join('');
+    const stripped = ex.hanzi.replace(/[，。！？、；：""''（）\s]/g, '');
+    if (joined !== stripped) {
+      ok(false, `tiles rebuild ${ex.hanzi}`, `tiles make "${joined}"`);
+    }
+  }));
+  ok(Store.S.patterns.every(p => p.examples.every(ex =>
+      ex.words.join('') === ex.hanzi.replace(/[，。！？、；：""''（）\s]/g, ''))),
+     'every pattern example rebuilds exactly from its tiles');
+  ok(Store.S.patterns.every(p => p.examples.every(ex =>
+      !ex.words.some(t => /[，。！？]/.test(t)))),
+     'no punctuation tiles');
+
+  /* ---- pptx import ------------------------------------------------------------------- */
+  section('Import');
+  ok(Pptx.isPinyin('nǐ hǎo'), 'tone-marked pinyin recognised');
+  ok(Pptx.isPinyin('huo guo'), 'plain pinyin recognised');
+  ok(!Pptx.isPinyin('hello there'), 'English is not mistaken for pinyin');
+  ok(!Pptx.isPinyin('你好'), 'characters are not mistaken for pinyin');
+  ok(Pptx.hasHan('我们'), 'Chinese detected');
+  ok(!Pptx.hasHan('abc'), 'Latin text is not Chinese');
+  const made = Import.makeWord('火锅', 'huǒ guō', 'hot pot');
+  eq(made.tones, [3,1], 'an imported word gets its tones');
+  eq(made.chars, ['火','锅'], 'an imported word lists its characters');
+
+  /* ---- quiz distractors ---------------------------------------------------------------- */
+  section('Quizzes');
+  freshProgress();
+  const target = V.find(w => V.filter(x => x.topic === w.topic).length > 5);
+  const ds = UI.distractors(target, 3, w => w.english, V);
+  eq(ds.length, 3, 'three distractors offered');
+  ok(!ds.some(d => d.id === target.id), 'the answer is not among the distractors');
+  ok(!ds.some(d => d.english === target.english), 'no distractor duplicates the answer text');
+
+  /* ---- cloud degradation ------------------------------------------------------------- */
+  section('Leaderboard');
+  const savedCode = Store.S.settings.familyCode;
+  Store.S.settings.familyCode = '';
+  ok(!Cloud.enabled(), 'the leaderboard stays off without a family code');
+  Store.S.settings.familyCode = 'TESTCODE';
+  ok(Cloud.enabled(), 'a family code switches it on');
+  const s = Cloud.summary();
+  ok('name' in s && 'streak' in s && 'known' in s, 'the summary has the expected shape');
+  ok(!('progress' in s) && !('mistakes' in s), 'no learning detail is uploaded');
+  Store.S.settings.familyCode = savedCode;
+
+  /* ---- done -------------------------------------------------------------------------- */
+  freshProgress();
+  try { localStorage.clear(); } catch (e) {}
+  document.getElementById('summary').textContent =
+    `${pass} passed · ${fail} failed`;
+  document.getElementById('summary').style.color = fail ? '#D0453F' : '#3E9B78';
+  window.__results = { pass, fail };
+}
+
+run().catch(e => {
+  document.getElementById('summary').textContent = 'harness crashed: ' + e.message;
+  document.getElementById('summary').style.color = '#D0453F';
+  window.__results = { pass, fail, crash: e.message };
+  console.error(e);
+});
+</script>
+</body>
+</html>

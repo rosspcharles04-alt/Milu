@@ -1,89 +1,83 @@
-/* Practice — the hub of everything you can drill on demand. */
+/* Practice.
+
+   Deliberately short. The lesson engine already covers recognition, recall and
+   production across nine exercise types, so duplicating those as standalone
+   quizzes just gave you a worse version of the same drill with no XP, no hearts
+   and no adaptation. What's left here is the things a lesson *can't* do:
+   a timed game, focused tone work, open-ended speaking, and sentence order. */
 (function () {
   const Views = window.Views = window.Views || {};
 
+  const cap = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+
+  function topicList() {
+    const counts = {};
+    Store.S.vocab.forEach(w => { counts[w.topic] = (counts[w.topic] || 0) + 1; });
+    return Object.entries(counts)
+      .map(([id, n]) => ({ id, n }))
+      .filter(t => t.n >= 6)
+      .sort((a, b) => b.n - a.n);
+  }
+
   Views.practice = function (host) {
     const c = SRS.counts();
+    const mistakes = Gamify.mistakeList();
     const topics = topicList();
 
     host.innerHTML = `
       <div class="topbar">
         <div>
           <div class="topbar__title">Practice</div>
-          <div class="topbar__sub">练习 · liànxí — pick your poison</div>
+          <div class="topbar__sub">练习 · liànxí</div>
         </div>
       </div>
 
-      ${Gamify.mistakeList().length ? `
+      ${mistakes.length ? `
         <button class="row" id="mistakes" style="background:var(--bad-soft)">
           <span class="row__lead" style="background:transparent;font-size:24px">🩹</span>
           <span class="row__main">
-            <span class="row__title">Your mistakes</span>
-            <span class="row__sub">${Gamify.mistakeList().length} word${
-              Gamify.mistakeList().length === 1 ? '' : 's'} to put right</span>
+            <span class="row__title">Fix your mistakes</span>
+            <span class="row__sub">${mistakes.length} word${mistakes.length === 1 ? '' : 's'} to put right</span>
           </span>
           ${UI.icon('chev', 18)}
         </button>` : ''}
 
-      <div class="section-title">Games</div>
-      <div class="grid grid--2">
+      <div class="grid grid--2" style="margin-top:4px">
         <button class="tile card--amber" data-go="#/match">
           <span class="tile__emoji">⚡️</span>
           <span class="tile__label">Match up</span>
           <span class="tile__sub">60 seconds, go</span>
         </button>
-        <button class="tile" data-go="#/session">
-          <span class="tile__emoji">🎯</span>
-          <span class="tile__label">Mixed lesson</span>
-          <span class="tile__sub">All exercise types</span>
-        </button>
-      </div>
-
-      <div class="section-title">Drills</div>
-      <div class="grid grid--2">
-        <button class="tile" data-go="#/quiz/meaning">
-          <span class="tile__emoji">🀄️</span>
-          <span class="tile__label">Character → meaning</span>
-          <span class="tile__sub">Read and recognise</span>
-        </button>
-        <button class="tile" data-go="#/quiz/hanzi">
-          <span class="tile__emoji">🔤</span>
-          <span class="tile__label">Meaning → character</span>
-          <span class="tile__sub">Harder direction</span>
-        </button>
-        <button class="tile" data-go="#/quiz/listen">
-          <span class="tile__emoji">🎧</span>
-          <span class="tile__label">Listening</span>
-          <span class="tile__sub">Ears only</span>
-        </button>
-        <button class="tile" data-go="#/quiz/pinyin">
-          <span class="tile__emoji">🅿️</span>
-          <span class="tile__label">Pinyin</span>
-          <span class="tile__sub">Get the sounds right</span>
-        </button>
         <button class="tile" data-go="#/tones">
           <span class="tile__emoji">🎵</span>
-          <span class="tile__label">Tone trainer</span>
-          <span class="tile__sub">Hear the difference</span>
+          <span class="tile__label">Tones</span>
+          <span class="tile__sub">Shapes, ear test, rules</span>
         </button>
         <button class="tile" data-go="#/speak">
           <span class="tile__emoji">🎤</span>
           <span class="tile__label">Speaking</span>
-          <span class="tile__sub">Say it, see your pitch</span>
+          <span class="tile__sub">See your pitch</span>
         </button>
         <button class="tile" data-go="#/sentences">
           <span class="tile__emoji">🧩</span>
-          <span class="tile__label">Sentence builder</span>
-          <span class="tile__sub">Word order drills</span>
+          <span class="tile__label">Sentences</span>
+          <span class="tile__sub">Word order</span>
         </button>
         <button class="tile" data-go="#/write">
           <span class="tile__emoji">✍️</span>
           <span class="tile__label">Writing</span>
-          <span class="tile__sub">Trace from memory</span>
+          <span class="tile__sub">From memory</span>
+        </button>
+        <button class="tile" data-go="#/session">
+          <span class="tile__emoji">🎯</span>
+          <span class="tile__label">Mixed lesson</span>
+          <span class="tile__sub">All nine types</span>
         </button>
       </div>
 
-      <div class="section-title">Quiz one topic</div>
+      <div class="section-title">Focus on one topic</div>
+      <p class="muted small" style="margin:-4px 4px 10px">
+        Runs a full lesson using only these words.</p>
       <div class="grid grid--auto">
         ${topics.map(t => `
           <button class="tile center" data-topic="${UI.esc(t.id)}" style="align-items:center">
@@ -91,20 +85,6 @@
             <span class="tile__label" style="font-size:13px">${UI.esc(cap(t.id))}</span>
             <span class="tile__sub">${t.n} words</span>
           </button>`).join('')}
-      </div>
-
-      <div class="section-title">By level</div>
-      <div class="grid grid--2">
-        <button class="tile" data-go="#/quiz/meaning/hsk/1">
-          <span class="tile__emoji">1️⃣</span>
-          <span class="tile__label">HSK 1</span>
-          <span class="tile__sub">${SRS.pool({ hsk: 1 }).length} words</span>
-        </button>
-        <button class="tile" data-go="#/quiz/meaning/hsk/2">
-          <span class="tile__emoji">2️⃣</span>
-          <span class="tile__label">HSK 2</span>
-          <span class="tile__sub">${SRS.pool({ hsk: 2 }).length} words</span>
-        </button>
       </div>
 
       <div class="card card--sky" style="margin-top:18px">
@@ -124,45 +104,9 @@
     });
 
     host.querySelectorAll('[data-topic]').forEach(b =>
-      b.addEventListener('click', () => chooseMode(b.dataset.topic)));
-  };
-
-  function chooseMode(topic) {
-    const modes = [
-      ['meaning', '🀄️', 'Character → meaning'],
-      ['hanzi',   '🔤', 'Meaning → character'],
-      ['pinyin',  '🅿️', 'Character → pinyin'],
-      ['listen',  '🎧', 'Listening'],
-      ['match',   '⚡️', 'Match up (timed)'],
-    ];
-    const s = UI.sheet(`
-      <h3 style="font-size:20px;font-weight:800;margin-bottom:4px">
-        ${UI.topicEmoji(topic)} ${UI.esc(cap(topic))}</h3>
-      <p class="muted small" style="margin-bottom:14px">How do you want to be tested?</p>
-      ${modes.map(([id, emoji, label]) => `
-        <button class="row" data-mode="${id}">
-          <span class="row__lead">${emoji}</span>
-          <span class="row__main"><span class="row__title">${label}</span></span>
-          ${UI.icon('chev', 18)}
-        </button>`).join('')}`);
-
-    s.querySelectorAll('[data-mode]').forEach(b =>
       b.addEventListener('click', () => {
-        UI.closeSheet();
-        App.go(b.dataset.mode === 'match'
-          ? `#/match/topic/${encodeURIComponent(topic)}`
-          : `#/quiz/${b.dataset.mode}/topic/${encodeURIComponent(topic)}`);
+        Audio2.unlock();
+        App.go('#/session/topic/' + encodeURIComponent(b.dataset.topic));
       }));
-  }
-
-  function topicList() {
-    const counts = {};
-    Store.S.vocab.forEach(w => { counts[w.topic] = (counts[w.topic] || 0) + 1; });
-    return Object.entries(counts)
-      .map(([id, n]) => ({ id, n }))
-      .filter(t => t.n >= 4)
-      .sort((a, b) => b.n - a.n);
-  }
-
-  const cap = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+  };
 })();
